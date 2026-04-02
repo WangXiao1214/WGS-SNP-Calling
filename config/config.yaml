@@ -1,0 +1,72 @@
+# =============================================================================
+# WGS SNP Calling Pipeline — 配置文件
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 输入输出路径
+# ---------------------------------------------------------------------------
+# 样本目录（每个子目录对应一个样本，内含 *1.fq.gz / *2.fq.gz）
+sample_dir: "/path/to/samples"
+
+# 参考基因组（fasta，需已有 .fai；BWA 索引若不存在会自动构建）
+reference: "/mnt/beegfs/Research/Database/hg19/GRCH37/GRCh37_p13_ncbi.fa"
+
+# 染色体列表（每行一个染色体名，与参考基因组保持一致）
+chrom_list: "config/chroms.txt"
+
+# 结果输出根目录
+outdir: "results"
+
+# ---------------------------------------------------------------------------
+# 软件路径（可直接写软件名，前提是已加入 PATH；也可写完整路径）
+# ---------------------------------------------------------------------------
+software:
+  fastp:    "/mnt/beegfs/Research/Software/fastp/fastp"
+  bwa:      "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/bwa"
+  samtools: "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/samtools"
+  sambamba: "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/sambamba"
+  mosdepth: "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/mosdepth"
+  gatk:     "/mnt/beegfs/Research/Software/gatk-4.1.8.1/gatk"
+  multiqc:  "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/multiqc"
+
+# ---------------------------------------------------------------------------
+# 线程配置
+# ---------------------------------------------------------------------------
+threads:
+  fastp:    8
+  bwa:      16
+  sort:     4        # samtools sort 附加线程
+  markdup:  8
+  mosdepth: 4
+
+# ---------------------------------------------------------------------------
+# 软件参数（可选，有合理默认值）
+# ---------------------------------------------------------------------------
+
+# fastp 额外参数
+fastp_extra: >-
+  --detect_adapter_for_pe
+  --correction
+  --overrepresentation_analysis
+  --length_required 50
+  --qualified_quality_phred 20
+  --unqualified_percent_limit 40
+  --n_base_limit 5
+
+# bwa mem 额外参数
+bwa_extra: "-K 100000000 -Y"
+
+# GATK JVM 内存设置
+gatk_java_opts: "-Xmx28g -XX:+UseParallelGC -XX:ParallelGCThreads=4"
+
+# mosdepth 覆盖度阈值（逗号分隔）
+mosdepth_thresholds: "1,5,10,15,20,25,30"
+# mosdepth 窗口大小（bp）
+mosdepth_window: 500
+
+# ---------------------------------------------------------------------------
+# GATK Hard Filter 过滤条件（没有 VQSR 训练集时使用）
+# 若有已知变异集，可将此处替换为 VQSR 流程
+# ---------------------------------------------------------------------------
+snp_filter_expr:   "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
+indel_filter_expr: "QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
