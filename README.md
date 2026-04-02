@@ -5,13 +5,9 @@
 ```
 .
 ├── Snakefile                  # 主流程
-├── run.sh                     # 启动脚本
 ├── config/
 │   ├── config.yaml            # 主配置（路径、软件、参数）
 │   └── chroms.txt             # 染色体列表
-└── profiles/
-    └── slurm/
-        └── config.yaml        # SLURM 集群配置
 ```
 
 ## 流程概览
@@ -61,17 +57,7 @@ sample_dir/
 ### 3. 运行
 
 ```bash
-# 先做 dry run 检查
-bash run.sh dry
-
-# 本地运行
-bash run.sh run
-
-# SLURM 集群（先修改 profiles/slurm/config.yaml）
-bash run.sh cluster
-
-# 生成流程 DAG 图
-bash run.sh dag
+snakemake -s snakefile -c config.yaml
 ```
 
 ## 输出结构
