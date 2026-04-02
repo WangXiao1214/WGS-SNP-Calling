@@ -107,3 +107,4 @@ results/
 - **并行粒度**：HaplotypeCaller 按样本 × 染色体并行，GenomicsDB 按染色体并行，充分利用集群资源
 - **临时文件**：排序后的 BAM 和 per-chrom GVCF 标记为 `temp()`，流程完成后自动清理
 - **过滤策略**：默认使用 GATK Hard Filter，如有已知变异集可在 `config.yaml` 中替换为 VQSR 参数
+# my_remote_test
