@@ -280,7 +280,6 @@ rule mosdepth:
             --fast-mode \
             --by {params.window} \
             --thresholds {params.thresholds} \
-            --no-abbrev \
             {params.prefix} \
             {input.bam} \
             > {log} 2>&1
