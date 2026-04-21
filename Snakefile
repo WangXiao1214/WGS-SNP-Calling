@@ -50,7 +50,7 @@ SAMPLES = get_samples(config["sample_dir"])
 SAMPLE_NAMES = list(SAMPLES.keys())
 
 # ---------------------------------------------------------------------------
-# 加载染色体/interval 列表
+# 加载染色体列表（用于 GenomicsDB / 过滤 / 合并等后续步骤）
 # ---------------------------------------------------------------------------
 def load_chroms(chrom_file):
     """每行一个染色体名，支持 # 注释行"""
@@ -65,6 +65,59 @@ def load_chroms(chrom_file):
 CHROMS = load_chroms(config["chrom_list"])
 
 # ---------------------------------------------------------------------------
+# 加载 HaplotypeCaller 用的 interval 分段列表
+#
+# 两种模式（在 config.yaml 中切换）：
+#   interval_mode: chrom   → 直接用 chroms.txt，每条染色体一个 job（默认）
+#   interval_mode: scatter → 用 scatter_dir/ 目录下的 .interval_list 文件
+#                            每个文件一个 job，大染色体分段并行（推荐）
+#
+# 生成 scatter interval 的命令：
+#   gatk SplitIntervals -R ref.fa --scatter-count 200 -O scatter_intervals/
+# ---------------------------------------------------------------------------
+def load_intervals(mode, chrom_file, scatter_dir=None):
+    if mode == "scatter":
+        scatter_path = Path(scatter_dir)
+        intervals = sorted([p.stem for p in scatter_path.glob("*.interval_list")])
+        if not intervals:
+            raise ValueError(f"在 {scatter_dir} 下未找到 .interval_list 文件")
+        return intervals
+    else:
+        return load_chroms(chrom_file)
+
+def build_chrom_to_intervals(mode, intervals, scatter_dir=None):
+    """返回 {chrom: [interval, ...]} 的映射，用于按染色体合并 GVCF"""
+    mapping = {c: [] for c in CHROMS}
+    if mode == "chrom":
+        for iv in intervals:
+            if iv in mapping:
+                mapping[iv].append(iv)
+    else:
+        for iv in intervals:
+            iv_file = Path(scatter_dir) / f"{iv}.interval_list"
+            with open(iv_file) as f:
+                seen = set()
+                for line in f:
+                    if line.startswith("@"):
+                        continue
+                    chrom = line.strip().split("\t")[0]
+                    if chrom in mapping and chrom not in seen:
+                        mapping[chrom].append(iv)
+                        seen.add(chrom)
+    return mapping
+
+INTERVAL_MODE      = config.get("interval_mode", "chrom")
+SCATTER_DIR        = config.get("scatter_dir", "scatter_intervals")
+INTERVALS          = load_intervals(INTERVAL_MODE, config["chrom_list"], SCATTER_DIR)
+CHROM_TO_INTERVALS = build_chrom_to_intervals(INTERVAL_MODE, INTERVALS, SCATTER_DIR)
+
+def interval_to_L(interval):
+    """interval 名 → 传给 GATK -L 的实际参数"""
+    if INTERVAL_MODE == "scatter":
+        return str(Path(SCATTER_DIR) / f"{interval}.interval_list")
+    return interval
+
+# ---------------------------------------------------------------------------
 # 路径辅助函数
 # ---------------------------------------------------------------------------
 REF   = config["reference"]
@@ -73,6 +126,7 @@ OUTDIR = config["outdir"]
 def ref_index_files(ref):
     """bwa 索引文件列表"""
     return [f"{ref}.{ext}" for ext in ["amb", "ann", "bwt", "pac", "sa"]]
+
 
 # =============================================================================
 # rule all：声明最终目标文件
@@ -90,8 +144,9 @@ rule all:
         # 过滤后最终 VCF（SNP + INDEL 分开）
         expand("{outdir}/vcf/filtered/{chrom}.snp.filtered.vcf.gz",   outdir=OUTDIR, chrom=CHROMS),
         expand("{outdir}/vcf/filtered/{chrom}.indel.filtered.vcf.gz", outdir=OUTDIR, chrom=CHROMS),
-        # 合并后的全基因组 VCF
+        # 合并后的全基因组 VCF + 索引
         f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz",
+        f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz.tbi",
         # MultiQC
         f"{OUTDIR}/qc/multiqc/multiqc_report.html"
 
@@ -294,8 +349,7 @@ rule haplotype_caller:
         bai = rules.index_bam.output.bai,
         ref = REF
     output:
-        gvcf = temp(f"{OUTDIR}/gvcf/{{sample}}/{{chrom}}.g.vcf.gz"),
-        tbi  = temp(f"{OUTDIR}/gvcf/{{sample}}/{{chrom}}.g.vcf.gz.tbi")
+        gvcf = temp(f"{OUTDIR}/gvcf/{{sample}}/{{chrom}}.g.vcf.gz")
     log:
         f"{OUTDIR}/logs/haplotype_caller/{{sample}}/{{chrom}}.log"
     threads: 2
@@ -315,6 +369,26 @@ rule haplotype_caller:
             -ERC GVCF \
             --native-pair-hmm-threads {threads} \
             > {log} 2>&1
+
+        """
+
+# =============================================================================
+# 8b. 为 GVCF 建索引（独立 rule，让 Snakemake 明确追踪 tbi）
+# =============================================================================
+rule index_gvcf:
+    input:
+        gvcf = f"{OUTDIR}/gvcf/{{sample}}/{{chrom}}.g.vcf.gz"
+    output:
+        tbi  = temp(f"{OUTDIR}/gvcf/{{sample}}/{{chrom}}.g.vcf.gz.tbi")
+    log:
+        f"{OUTDIR}/logs/haplotype_caller/{{sample}}/{{chrom}}.tbi.log"
+    threads: 1
+    resources:
+        mem_gb   = 4,
+        walltime = "0:30:00"
+    shell:
+        """
+        {config[software][tabix]} -f -p vcf {input.gvcf} > {log} 2>&1
         """
 
 # =============================================================================
@@ -326,10 +400,13 @@ rule combine_sample_gvcf:
             "{outdir}/gvcf/{sample}/{chrom}.g.vcf.gz",
             outdir=OUTDIR, chrom=CHROMS, allow_missing=True
         ),
+        tbis  = expand(
+            "{outdir}/gvcf/{sample}/{chrom}.g.vcf.gz.tbi",
+            outdir=OUTDIR, chrom=CHROMS, allow_missing=True
+        ),
         ref   = REF
     output:
-        gvcf = f"{OUTDIR}/gvcf_merged/{{sample}}.g.vcf.gz",
-        tbi  = f"{OUTDIR}/gvcf_merged/{{sample}}.g.vcf.gz.tbi"
+        gvcf = f"{OUTDIR}/gvcf_merged/{{sample}}.g.vcf.gz"
     log:
         f"{OUTDIR}/logs/combine_sample_gvcf/{{sample}}.log"
     threads: 4
@@ -347,6 +424,26 @@ rule combine_sample_gvcf:
             {params.variants} \
             -O {output.gvcf} \
             > {log} 2>&1
+
+        """
+
+# =============================================================================
+# 9b. 为合并后的单样本 GVCF 建索引
+# =============================================================================
+rule index_sample_gvcf:
+    input:
+        gvcf = f"{OUTDIR}/gvcf_merged/{{sample}}.g.vcf.gz"
+    output:
+        tbi  = f"{OUTDIR}/gvcf_merged/{{sample}}.g.vcf.gz.tbi"
+    log:
+        f"{OUTDIR}/logs/combine_sample_gvcf/{{sample}}.tbi.log"
+    threads: 1
+    resources:
+        mem_gb   = 4,
+        walltime = "0:30:00"
+    shell:
+        """
+        {config[software][tabix]} -f -p vcf {input.gvcf} > {log} 2>&1
         """
 
 # =============================================================================
@@ -356,6 +453,10 @@ rule genomics_db_import:
     input:
         gvcfs = expand(
             "{outdir}/gvcf_merged/{sample}.g.vcf.gz",
+            outdir=OUTDIR, sample=SAMPLE_NAMES
+        ),
+        tbis  = expand(
+            "{outdir}/gvcf_merged/{sample}.g.vcf.gz.tbi",
             outdir=OUTDIR, sample=SAMPLE_NAMES
         )
     output:
@@ -394,8 +495,7 @@ rule genotype_gvcfs:
         db  = rules.genomics_db_import.output.db,
         ref = REF
     output:
-        vcf = f"{OUTDIR}/vcf/genotyped/{{chrom}}.vcf.gz",
-        tbi = f"{OUTDIR}/vcf/genotyped/{{chrom}}.vcf.gz.tbi"
+        vcf = f"{OUTDIR}/vcf/genotyped/{{chrom}}.vcf.gz"
     log:
         f"{OUTDIR}/logs/genotype_gvcfs/{{chrom}}.log"
     threads: 4
@@ -413,6 +513,26 @@ rule genotype_gvcfs:
             -L {wildcards.chrom} \
             -O {output.vcf} \
             > {log} 2>&1
+
+        """
+
+# =============================================================================
+# 11b. 为 genotyped VCF 建索引
+# =============================================================================
+rule index_genotyped_vcf:
+    input:
+        vcf = f"{OUTDIR}/vcf/genotyped/{{chrom}}.vcf.gz"
+    output:
+        tbi = f"{OUTDIR}/vcf/genotyped/{{chrom}}.vcf.gz.tbi"
+    log:
+        f"{OUTDIR}/logs/genotype_gvcfs/{{chrom}}.tbi.log"
+    threads: 1
+    resources:
+        mem_gb   = 4,
+        walltime = "0:30:00"
+    shell:
+        """
+        {config[software][tabix]} -f -p vcf {input.vcf} > {log} 2>&1
         """
 
 # =============================================================================
@@ -421,10 +541,10 @@ rule genotype_gvcfs:
 rule filter_snp:
     input:
         vcf = rules.genotype_gvcfs.output.vcf,
+        tbi = rules.index_genotyped_vcf.output.tbi,
         ref = REF
     output:
-        vcf = f"{OUTDIR}/vcf/filtered/{{chrom}}.snp.filtered.vcf.gz",
-        tbi = f"{OUTDIR}/vcf/filtered/{{chrom}}.snp.filtered.vcf.gz.tbi"
+        vcf = f"{OUTDIR}/vcf/filtered/{{chrom}}.snp.filtered.vcf.gz"
     log:
         f"{OUTDIR}/logs/filter_snp/{{chrom}}.log"
     threads: 2
@@ -473,13 +593,32 @@ rule filter_snp:
         rm -f $TMP_RAW $TMP_RAW.tbi $TMP_MARKED $TMP_MARKED.tbi
         """
 
+# =============================================================================
+# 12b. 为过滤后 SNP VCF 建索引
+# =============================================================================
+rule index_snp_vcf:
+    input:
+        vcf = f"{OUTDIR}/vcf/filtered/{{chrom}}.snp.filtered.vcf.gz"
+    output:
+        tbi = f"{OUTDIR}/vcf/filtered/{{chrom}}.snp.filtered.vcf.gz.tbi"
+    log:
+        f"{OUTDIR}/logs/filter_snp/{{chrom}}.tbi.log"
+    threads: 1
+    resources:
+        mem_gb   = 4,
+        walltime = "0:30:00"
+    shell:
+        """
+        {config[software][tabix]} -f -p vcf {input.vcf} > {log} 2>&1
+        """
+
 rule filter_indel:
     input:
         vcf = rules.genotype_gvcfs.output.vcf,
+        tbi = rules.index_genotyped_vcf.output.tbi,
         ref = REF
     output:
-        vcf = f"{OUTDIR}/vcf/filtered/{{chrom}}.indel.filtered.vcf.gz",
-        tbi = f"{OUTDIR}/vcf/filtered/{{chrom}}.indel.filtered.vcf.gz.tbi"
+        vcf = f"{OUTDIR}/vcf/filtered/{{chrom}}.indel.filtered.vcf.gz"
     log:
         f"{OUTDIR}/logs/filter_indel/{{chrom}}.log"
     threads: 2
@@ -529,15 +668,35 @@ rule filter_indel:
         """
 
 # =============================================================================
+# 12c. 为过滤后 INDEL VCF 建索引
+# =============================================================================
+rule index_indel_vcf:
+    input:
+        vcf = f"{OUTDIR}/vcf/filtered/{{chrom}}.indel.filtered.vcf.gz"
+    output:
+        tbi = f"{OUTDIR}/vcf/filtered/{{chrom}}.indel.filtered.vcf.gz.tbi"
+    log:
+        f"{OUTDIR}/logs/filter_indel/{{chrom}}.tbi.log"
+    threads: 1
+    resources:
+        mem_gb   = 4,
+        walltime = "0:30:00"
+    shell:
+        """
+        {config[software][tabix]} -f -p vcf {input.vcf} > {log} 2>&1
+        """
+
+# =============================================================================
 # 13. 合并所有染色体的过滤后 VCF（SNP + INDEL 合并）
 # =============================================================================
 rule merge_filtered_vcf:
     input:
-        snps   = expand("{outdir}/vcf/filtered/{chrom}.snp.filtered.vcf.gz",   outdir=OUTDIR, chrom=CHROMS),
-        indels = expand("{outdir}/vcf/filtered/{chrom}.indel.filtered.vcf.gz", outdir=OUTDIR, chrom=CHROMS)
+        snps      = expand("{outdir}/vcf/filtered/{chrom}.snp.filtered.vcf.gz",       outdir=OUTDIR, chrom=CHROMS),
+        indels    = expand("{outdir}/vcf/filtered/{chrom}.indel.filtered.vcf.gz",     outdir=OUTDIR, chrom=CHROMS),
+        snp_tbis  = expand("{outdir}/vcf/filtered/{chrom}.snp.filtered.vcf.gz.tbi",   outdir=OUTDIR, chrom=CHROMS),
+        indel_tbis= expand("{outdir}/vcf/filtered/{chrom}.indel.filtered.vcf.gz.tbi", outdir=OUTDIR, chrom=CHROMS)
     output:
-        vcf = f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz",
-        tbi = f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz.tbi"
+        vcf = f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz"
     log:
         f"{OUTDIR}/logs/merge_filtered_vcf/merge.log"
     threads: 4
@@ -557,6 +716,26 @@ rule merge_filtered_vcf:
             {params.all_vcfs} \
             -O {output.vcf} \
             > {log} 2>&1
+
+        """
+
+# =============================================================================
+# 13b. 为最终合并 VCF 建索引
+# =============================================================================
+rule index_final_vcf:
+    input:
+        vcf = f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz"
+    output:
+        tbi = f"{OUTDIR}/vcf/final/all_samples.filtered.vcf.gz.tbi"
+    log:
+        f"{OUTDIR}/logs/merge_filtered_vcf/final.tbi.log"
+    threads: 1
+    resources:
+        mem_gb   = 4,
+        walltime = "0:30:00"
+    shell:
+        """
+        {config[software][tabix]} -f -p vcf {input.vcf} > {log} 2>&1
         """
 
 # =============================================================================
@@ -591,3 +770,4 @@ rule multiqc:
             --force \
             > {log} 2>&1
         """
+

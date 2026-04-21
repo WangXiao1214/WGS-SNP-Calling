@@ -8,6 +8,8 @@
 ├── config/
 │   ├── config.yaml            # 主配置（路径、软件、参数）
 │   └── chroms.txt             # 染色体列表
+|—— bin/                       # 软件目录
+    |—— ngs_qc_summary.py      # 统计QC结果
 ```
 
 ## 流程概览
@@ -26,6 +28,8 @@ fastp（质控）
                                       └── filter_indel（SelectVariants + VariantFiltration）
                                             └── merge_filtered_vcf（全基因组合并）
                                                   └── MultiQC（汇总报告）
+
+可以使用 ngs_qc_summary.py 在result中统计样本的质控信息
 ```
 
 ## 使用方法
@@ -94,3 +98,9 @@ results/
 - **临时文件**：排序后的 BAM 和 per-chrom GVCF 标记为 `temp()`，流程完成后自动清理
 - **过滤策略**：默认使用 GATK Hard Filter，如有已知变异集可在 `config.yaml` 中替换为 VQSR 参数
 # my_remote_test
+
+
+
+## 更新
+
+添加了gatk结果后强制构架tbi索引

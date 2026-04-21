@@ -6,13 +6,13 @@
 # 输入输出路径
 # ---------------------------------------------------------------------------
 # 样本目录（每个子目录对应一个样本，内含 *1.fq.gz / *2.fq.gz）
-sample_dir: "/path/to/samples"
+sample_dir: "/mnt/beegfs/Research/Users/wangxiao01/Work/20260401_summary/WES/data1"
 
 # 参考基因组（fasta，需已有 .fai；BWA 索引若不存在会自动构建）
-reference: "/mnt/beegfs/Research/Database/hg19/GRCH37/GRCh37_p13_ncbi.fa"
+reference: "/mnt/beegfs/Research/Users/wangxiao01/Work/20260401_summary/WES/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
 
 # 染色体列表（每行一个染色体名，与参考基因组保持一致）
-chrom_list: "config/chroms.txt"
+chrom_list: "/mnt/beegfs/Research/Pipeline/SNPCalling/Version3/config/chroms.txt"
 
 # 结果输出根目录
 outdir: "results"
