@@ -10,6 +10,7 @@
 │   └── chroms.txt             # 染色体列表
 |—— bin/                       # 软件目录
     |—— ngs_qc_summary.py      # 统计QC结果
+    |—— calc_qc_stats.sh        # 统计VCF文件中的信息
 ```
 
 ## 流程概览
@@ -30,6 +31,7 @@ fastp（质控）
                                                   └── MultiQC（汇总报告）
 
 可以使用 ngs_qc_summary.py 在result中统计样本的质控信息
+使用 calc_qc_stats.sh 统计vcf文件中样本的 Ti/Tv ratio；Het/Hom ratio；SNP；InDel；性别预测等信息
 ```
 
 ## 使用方法
@@ -103,4 +105,4 @@ results/
 
 ## 更新
 
-添加了gatk结果后强制构架tbi索引
+添加统计脚本 calc_qc_stats.sh
