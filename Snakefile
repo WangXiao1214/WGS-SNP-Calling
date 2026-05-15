@@ -332,6 +332,7 @@ rule mosdepth:
         """
         {config[software][mosdepth]} \
             --threads {threads} \
+            --no-per-base \
             --fast-mode \
             --by {params.window} \
             --thresholds {params.thresholds} \
