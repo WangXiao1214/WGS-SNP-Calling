@@ -141,6 +141,8 @@ rule all:
         expand("{outdir}/qc/bam/{sample}.stats.txt",     outdir=OUTDIR, sample=SAMPLE_NAMES),
         # 覆盖度
         expand("{outdir}/qc/mosdepth/{sample}.mosdepth.summary.txt", outdir=OUTDIR, sample=SAMPLE_NAMES),
+        # Picard WGS metrics
+        expand("{outdir}/qc/picard/{sample}.wgs_metrics.txt", outdir=OUTDIR, sample=SAMPLE_NAMES),
         # 过滤后最终 VCF（SNP + INDEL 分开）
         expand("{outdir}/vcf/filtered/{chrom}.snp.filtered.vcf.gz",   outdir=OUTDIR, chrom=CHROMS),
         expand("{outdir}/vcf/filtered/{chrom}.indel.filtered.vcf.gz", outdir=OUTDIR, chrom=CHROMS),
@@ -308,7 +310,7 @@ rule bam_stats:
         """
 
 # =============================================================================
-# 7. 覆盖度统计（mosdepth）
+# 7a. 覆盖度统计（mosdepth）
 # =============================================================================
 rule mosdepth:
     input:
@@ -338,6 +340,42 @@ rule mosdepth:
             --thresholds {params.thresholds} \
             {params.prefix} \
             {input.bam} \
+            > {log} 2>&1
+        """
+
+# =============================================================================
+# 7b. 覆盖度统计（Picard CollectWgsMetrics）
+# =============================================================================
+rule picard_wgs_metrics:
+    input:
+        bam = rules.markdup.output.bam,
+        bai = rules.index_bam.output.bai,
+        ref = REF
+    output:
+        metrics   = f"{OUTDIR}/qc/picard/{{sample}}.wgs_metrics.txt",
+    log:
+        f"{OUTDIR}/logs/picard_wgs_metrics/{{sample}}.log"
+    threads: 2
+    resources:
+        mem_gb   = 16,
+        walltime = "4:00:00"
+    params:
+        java_opts = config.get("picard_java_opts", "-Xmx14g"),
+        min_bq    = config.get("picard_min_bq", 20),
+        min_mq    = config.get("picard_min_mq", 20)
+    shell:
+        """
+        mkdir -p {OUTDIR}/qc/picard
+
+        {config[software][picard]} \
+            CollectWgsMetrics \
+            I={input.bam} \
+            O={output.metrics} \
+            R={input.ref} \
+            INCLUDE_BQ_HISTOGRAM=true \
+            MINIMUM_BASE_QUALITY={params.min_bq} \
+            MINIMUM_MAPPING_QUALITY={params.min_mq} \
+            VALIDATION_STRINGENCY=SILENT \
             > {log} 2>&1
         """
 

@@ -28,6 +28,7 @@ software:
   mosdepth: "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/mosdepth"
   gatk:     "/mnt/beegfs/Research/Software/gatk-4.1.8.1/gatk"
   multiqc:  "/mnt/beegfs/mashujie/miniconda3/envs/meth_env/bin/multiqc"
+  picard::  "/mnt/beegfs/Research/Users/wangxiao01/anaconda3/bin/picard"
 
 # ---------------------------------------------------------------------------
 # 线程配置
@@ -63,6 +64,12 @@ gatk_java_opts: "-Xmx28g -XX:+UseParallelGC -XX:ParallelGCThreads=4"
 mosdepth_thresholds: "1,5,10,15,20,25,30"
 # mosdepth 窗口大小（bp）
 mosdepth_window: 500
+
+# picard 参数设置
+picard_java_opts: "-Xmx14g"
+
+picard_min_bq: 20
+picard_min_mq: 20
 
 # ---------------------------------------------------------------------------
 # GATK Hard Filter 过滤条件（没有 VQSR 训练集时使用）
