@@ -29,6 +29,7 @@ fastp（质控过滤）
         └── sambamba markdup（标记 PCR 重复）
               ├── samtools idxstats / flagstat / stats（BAM 统计）
               ├── mosdepth（覆盖度统计）
+              ├── picard CollectWgsMetrics（全基因组覆盖度统计）
               └── GATK HaplotypeCaller（-ERC GVCF，按染色体并行）
                     └── GATK CombineGVCFs（单样本各染色体 GVCF 合并）
                           └── GATK GenomicsDBImport（按染色体，多样本联合导入）
@@ -56,6 +57,7 @@ fastp（质控过滤）
 | samtools | 1.21 (htslib 1.21) | BAM 处理与统计 |
 | sambamba | 1.0.1 | 标记 PCR 重复、BAM 索引 |
 | mosdepth | 0.3.10 | 测序深度/覆盖度统计 |
+| picard   | 2.27.5 | 全基因组覆盖度统计 |
 | GATK | 4.1.8.1 | 变异检测（HaplotypeCaller / GenomicsDB / GenotypeGVCFs / 过滤） |
 | tabix | 1.21 (htslib) | VCF/GVCF 索引 |
 | MultiQC | 1.27.1 | 多样本 QC 汇总报告 |
@@ -140,7 +142,7 @@ fastp（质控过滤）
 
 ---
 
-### 5. mosdepth — 测序深度/覆盖度
+### 5a. mosdepth — 测序深度/覆盖度
 
 **线程：** `threads.mosdepth`（默认 4）  
 **内存：** 16 GB  
@@ -154,6 +156,26 @@ fastp（质控过滤）
 | `--thresholds` | `1,5,10,15,20,25,30` | 输出各深度阈值下的覆盖率 |
 
 **输出：** `{sample}.mosdepth.summary.txt`（全基因组平均深度）、`{sample}.mosdepth.global.dist.txt`（累积覆盖率分布）、`{sample}.regions.bed.gz`（各窗口深度）
+
+---
+
+### 5b. picard — 测序深度/覆盖度
+
+**线程：** 2 
+**内存：** 14 GB  
+**主要参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| I | 无 |输入的 BAM 文件路径 |
+| O | 无 |输出的 WGS 指标文本文件路径 |
+| R | 无 |参考基因组 FASTA 文件路径 |
+| INCLUDE_BQ_HISTOGRAM |false |是否生成碱基质量直方图 |
+| MINIMUM_BASE_QUALITY |20 |用于计数覆盖度的最低碱基质量值 |
+| MINIMUM_MAPPING_QUALITY |20 |用于计数覆盖度的最低比对质量值 |
+| COUNT_UNPAIRED |true | 是否将未配对的 reads 计入覆盖度统计 |
+| VALIDATION_STRINGENCY |STRICT |验证级别：STRICT（严格）、LENIENT（宽松）、SILENT（静默） |
+
 
 ---
 
